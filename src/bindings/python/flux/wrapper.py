@@ -65,11 +65,16 @@ class ErrorPrinter(object):
         )
 
 
-# A do-nothing class for checking for composition-based wrappers that offer a
-# handle attribute
 class WrapperBase(object):
+    """A do-nothing class for checking for composition-based wrappers that 
+    offer a handle attribute.
+    """
     def __init__(self):
         self._handle = None
+
+    def __repr__(self):
+        """Return a string representation of the constructor call for this object"""
+        return "{}()".format(type(self).__name__)
 
     @property
     def handle(self):
@@ -221,8 +226,7 @@ class FunctionWrapper(object):
 
 
 class Wrapper(WrapperBase):
-    """
-    Forms a wrapper around an interface that dynamically searches for undefined
+    """Forms a wrapper around an interface that dynamically searches for undefined
     names, and can detect and pass a handle argument of specified type when it
     is found in the signature of an un-specified target function.
     """
@@ -247,6 +251,12 @@ class Wrapper(WrapperBase):
         self.filter_match = filter_match
         self.prefixes = prefixes
         self.destructor = destructor
+
+    def __repr__(self):
+        """Return str representation of constructor call"""
+        return "{}({}, {}, handle={}, match={}, filter_match={}, prefixes={}," \
+            " destructor={})".format(type(self).__name__, self.ffi, self.lib, 
+            self.handle, self.match, self.filter_match, self.prefixes, self.destructor)
 
     def check_handle(self, name, fun_type):
         if self.match is not None and self._handle is not None:
@@ -309,6 +319,7 @@ class Wrapper(WrapperBase):
         return new_method
 
     def __clear(self):
+        """Clean up the instance by calling the destructor"""
         # avoid recursion
         handle = self._handle
         if handle is None:
@@ -339,6 +350,7 @@ class Wrapper(WrapperBase):
         self._handle = h
 
     def __del__(self):
+        """Clean-up function to be called by the interpreter upon garbage collection"""
         self.__clear()
 
     def __enter__(self):

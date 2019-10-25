@@ -44,6 +44,7 @@ def check_future_error(func):
 
 
 def encode_payload(payload):
+    """Convert payload to utf-8 binary string, compatible with python 2 or 3"""
     if payload is None or payload == ffi.NULL:
         payload = ffi.NULL
     elif isinstance(payload, six.text_type):
@@ -54,7 +55,7 @@ def encode_payload(payload):
 
 
 def encode_topic(topic):
-    # Convert topic to utf-8 binary string
+    """Convert topic to utf-8 binary string, compatible with python 2 or 3"""
     if topic is None or topic == ffi.NULL:
         raise EnvironmentError(errno.EINVAL, "Topic must not be None/NULL")
     elif isinstance(topic, six.text_type):

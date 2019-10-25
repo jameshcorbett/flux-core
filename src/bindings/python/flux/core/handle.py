@@ -20,14 +20,23 @@ from _flux._core import ffi, lib
 
 
 class Flux(Wrapper):
+    """The general Flux handle class, used to interface with a Flux process.
+
+    >>> flux.Flux() #doctest: +ELLIPSIS
+    <flux.core.Flux object at 0x...>
     """
-  The general Flux handle class, create one of these to connect to the
-  nearest enclosing flux instance
-  >>> flux.Flux() #doctest: +ELLIPSIS
-  <flux.core.Flux object at 0x...>
-  """
 
     def __init__(self, url=ffi.NULL, flags=0, handle=None):
+        """Construct an object that provides an interface to a Flux process.
+
+        For simple use cases, the arguments can be left empty. In that case, 
+        this method provides an interface to the nearest enclosing Flux instance.
+        For more complicated use cases, pass an explicit url to connect to the 
+        Flux process at that address.
+
+        :param url: the url of the Flux process to connect to. Leave 
+        empty to connect to the nearest enclosing Flux process.
+        """
         super(Flux, self).__init__(
             ffi,
             lib,
@@ -58,7 +67,7 @@ class Flux(Wrapper):
 
     def log(self, level, fstring):
         """
-        Log to the flux logging facility
+        Log the passed string to the flux logging facility with the passed log level
 
         :param level: A syslog log-level, check the syslog module for possible
                values
@@ -112,7 +121,18 @@ class Flux(Wrapper):
         return None
 
     def rpc(self, topic, payload=None, nodeid=raw.FLUX_NODEID_ANY, flags=0):
-        """ Create a new RPC object """
+        """Initiate an asynchronous remote procedure call (rpc).
+
+        This method initiates a rpc and returns a RPC object, which is a type 
+        of future (and a subclass of flux.Future). For instance, you might call
+        this method as flux_instance.rpc("job.submit", json.dumps(job_spec)), where
+        job_spec is a dictionary describing the job and its resource requirements.
+        Passing in job_spec directly without calling json.dumps is also supported.
+
+        :param topic: a string indicating the type of method call
+        :param payload: the (optional) payload to include in the method call
+        :type payload: None, str, bytes, unicode, or json-serializable
+        """
         return RPC(self, topic, payload, nodeid, flags)
 
     def mrpc_create(self, topic, payload=None, rankset="any", flags=0):

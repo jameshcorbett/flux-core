@@ -45,7 +45,9 @@ def encode_rankset(rankset):
 
 
 class MRPC(WrapperPimpl):
-    """An MRPC state object"""
+    """A class whose instances represent remote procedure calls (RPC's)
+    to multiple MPI ranks. 
+    """
 
     class InnerWrapper(Wrapper):
 
@@ -74,19 +76,33 @@ class MRPC(WrapperPimpl):
             self.handle = raw.flux_mrpc(flux_handle, topic, payload, rankset, flags)
 
     def __init__(self, flux_handle, topic, payload=None, rankset="all", flags=0):
+        """Construct an MRPC object.
+
+        Submits a message with given payload to a Flux instance, and which then
+        passes the message to the all the specified MPI ranks. Responses from each
+        rank can be retrieved by iterating over this object.
+
+        :param flux_handle: a Flux object, representing the actual 
+        Flux program to submit the message to
+        :param topic: a string indicating the type of method call
+        :param payload: the (optional) payload to include in the method call
+        :type payload: None, str, bytes, unicode, or json-serializable
+        """
         super(MRPC, self).__init__()
         self.pimpl = self.InnerWrapper(flux_handle, topic, payload, rankset, flags)
         self.then_args = None
         self.then_cb = None
 
     def __iter__(self):
+        """Return an iterator over this object"""
         return self
 
     def next(self):
+        """Return a tuple with the nodeid and response payload of a single rank"""
         return self.__next__()
 
-    # returns a tuple with the nodeid and the response payload
     def __next__(self):
+        """Return a tuple with the nodeid and response payload of a single rank"""
         ret = self.pimpl.next()
         if ret < 0:
             raise StopIteration()

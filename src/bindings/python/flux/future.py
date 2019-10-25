@@ -82,6 +82,7 @@ class Future(WrapperPimpl):
         return errmsg.decode("utf-8") if errmsg else None
 
     def get_flux(self):
+        """Return a handle to the Flux instance this object is attached to, or None"""       
         # pylint: disable=cyclic-import
         import flux.core.handle
 
@@ -94,6 +95,7 @@ class Future(WrapperPimpl):
         return self.pimpl.get_reactor()
 
     def then(self, callback, arg=None, timeout=-1.0):
+        """Attach the passed callback to this future object"""
         if self in _THEN_HANDLES:
             raise EnvironmentError(
                 errno.EEXIST, "then callback already exists for this future"
@@ -124,7 +126,13 @@ class Future(WrapperPimpl):
             _THEN_HANDLES[self] += 1
 
     def is_ready(self):
+        """Return a boolean indicating whether the future is ready"""
         return self.pimpl.is_ready()
 
     def wait_for(self, timeout=-1.0):
+        """Wait on the future for the specified amount of time, or indefinitely.
+
+        If the timeout argument is omitted, this call will not return 
+        until the result is ready.
+        """
         self.pimpl.wait_for(timeout)

@@ -24,4 +24,5 @@ from flux.job.event import (
     EventLogEvent,
     JobException,
 )
+from flux.job.executor import FluxExecutor
 from flux.core.inner import ffi

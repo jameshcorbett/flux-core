@@ -1,3 +1,5 @@
+"""This module defines the FluxExecutor class."""
+
 import threading
 import collections
 import concurrent.futures
@@ -7,6 +9,8 @@ import flux.job
 
 
 class WaitingThread(threading.Thread):
+    """Thread that waits for jobs to complete and fulfills futures."""
+
     def __init__(self, exit_event, future_queue, **kwargs):
         super().__init__(**kwargs)
         self.__flux_handle = flux.Flux()
@@ -15,15 +19,17 @@ class WaitingThread(threading.Thread):
         self.__unrecognized_results = collections.deque()
 
     def run(self):
-        """Loop indefinitely, marking futures as completed when jobs finish."""
-        # not all jobs returned from Flux may have an associated Future
-        # keep those jobs around, they may eventually get an associated Future
-        jobid_mapping = {}
+        """Loop indefinitely, marking futures as completed when jobs finish.
+
+        Not all jobs returned from Flux may have an associated Future.
+        Keep those jobs around, they may eventually get an associated Future.
+        """
+        jobid_mapping = {}  # map jobids to user-facing futures
         while not self.__exit_event.is_set():
-            for result_fetcher in (self._get_result_from_flux, self._get_cached_result):
+            for result_fetcher in (self._get_new_result, self._get_cached_result):
                 result = result_fetcher()
                 if result is None:
-                    continue
+                    continue  # no completed jobs, try again
                 user_future = self._get_future_from_flux_jobid(
                     result.jobid, jobid_mapping
                 )
@@ -33,13 +39,14 @@ class WaitingThread(threading.Thread):
                     self._complete_future(user_future, result)
 
     def _get_future_from_flux_jobid(self, jobid_to_fetch, jobid_mapping):
-        while self.__future_queue:
+        """Return the user-facing future associated with a jobid"""
+        while self.__future_queue:  # collect any new user-facing futures
             jobid, future = self.__future_queue.popleft()
             jobid_mapping[jobid] = future
         return jobid_mapping.pop(jobid_to_fetch, None)
 
-    def _get_result_from_flux(self):
-        """Return the latest completion from Flux, or None."""
+    def _get_new_result(self):
+        """Return the latest completed job from Flux, or None."""
         try:
             return flux.job.wait(self.__flux_handle)
         except:  # no waitable jobs
@@ -63,6 +70,8 @@ class WaitingThread(threading.Thread):
 
 
 class SubmissionThread(threading.Thread):
+    """Thread that, when started, submits jobspecs to Flux."""
+
     def __init__(self, exit_event, jobspecs_to_submit, jobid_future_pairs, **kwargs):
         super().__init__(**kwargs)
         self.__exit_event = exit_event
@@ -70,6 +79,7 @@ class SubmissionThread(threading.Thread):
         self.__jobid_future_pairs = jobid_future_pairs
 
     def run(self):
+        """Loop indefinitely, submitting jobspecs and fetching jobids."""
         broker = flux.Flux()
         while not self.__exit_event.is_set():
             while self.__jobspecs_to_submit:
@@ -88,11 +98,17 @@ class SubmissionThread(threading.Thread):
                 raise RuntimeError(msg)
 
     def _get_jobid_from_submission_future(self, submission_future, user_future):
+        """Callback invoked when a jobid is ready for a submitted jobspec."""
         jobid = flux.job.submit_get_id(submission_future)
         self.__jobid_future_pairs.append((jobid, user_future))
 
 
 class FluxExecutor:
+    """Provides methods to submit jobs to Flux asynchronously.
+
+    Heavily inspired by the ``concurrent.futures.Executor`` class.
+    """
+
     def __init__(self):
         self._submission_queue = collections.deque()
         self._jobid_future_pairs = collections.deque()
@@ -113,6 +129,7 @@ class FluxExecutor:
         self._shutdown_event.set()
 
     def submit(self, jobspec):
+        """Submit a jobspec to Flux and return a future."""
         fut = concurrent.futures.Future()
         fut.set_running_or_notify_cancel()
         self._submission_queue.append((jobspec, fut))

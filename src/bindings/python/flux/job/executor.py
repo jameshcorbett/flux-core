@@ -1,6 +1,7 @@
 """This module defines the FluxExecutor class."""
 
 import threading
+import itertools
 import collections
 import concurrent.futures
 
@@ -109,19 +110,24 @@ class FluxExecutor:
     Heavily inspired by the ``concurrent.futures.Executor`` class.
     """
 
-    def __init__(self):
+    # Used to assign unique thread names when thread_name_prefix is not supplied.
+    _counter = itertools.count().__next__
+
+    def __init__(self, thread_name_prefix=""):
         self._submission_queue = collections.deque()
         self._jobid_future_pairs = collections.deque()
         self._shutdown_event = threading.Event()
+        thread_name_prefix = (thread_name_prefix or f"{type(self).__name__}-{self._counter()}")
         self._submission_thread = SubmissionThread(
             self._shutdown_event,
             self._submission_queue,
             self._jobid_future_pairs,
             daemon=True,
+            name=(thread_name_prefix + "-submission")
         )
         self._submission_thread.start()
         self._waiting_thread = WaitingThread(
-            self._shutdown_event, self._jobid_future_pairs, daemon=True,
+            self._shutdown_event, self._jobid_future_pairs, daemon=True, name=(thread_name_prefix + "-waiting")
         )
         self._waiting_thread.start()
 

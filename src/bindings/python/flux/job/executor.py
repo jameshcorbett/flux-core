@@ -13,80 +13,24 @@ import logging
 import itertools
 import collections
 import concurrent.futures
+import atexit
 
 import flux
 import flux.job
 
 
-class WaitingThread(threading.Thread):
-    """Thread that waits for jobs to complete and fulfills futures."""
-
-    def __init__(self, exit_event, future_queue, broker_args, broker_kwargs, **kwargs):
-        super().__init__(**kwargs)
-        self.__broker = flux.Flux(*broker_args, **broker_kwargs)
-        self.__exit_event = exit_event
-        self.__future_queue = future_queue
-        self.__unrecognized_results = collections.deque()
-
-    def run(self):
-        """Loop indefinitely, marking futures as completed when jobs finish.
-
-        Not all jobs returned from Flux may have an associated Future.
-        Keep those jobs around, they may eventually get an associated Future.
-        """
-        jobid_mapping = {}  # map jobids to user-facing futures
-        while not self.__exit_event.is_set():
-            for result_fetcher in (self._get_new_result, self._get_cached_result):
-                result = result_fetcher()
-                if result is None:
-                    continue  # no completed jobs, try again
-                user_future = self._get_future_from_flux_jobid(
-                    result.jobid, jobid_mapping
-                )
-                if user_future is None:
-                    self.__unrecognized_results.append(result)
-                else:
-                    self._complete_future(user_future, result)
-
-    def _get_future_from_flux_jobid(self, jobid_to_fetch, jobid_mapping):
-        """Return the user-facing future associated with a jobid"""
-        while self.__future_queue:  # collect any new user-facing futures
-            jobid, future = self.__future_queue.popleft()
-            jobid_mapping[jobid] = future
-        return jobid_mapping.pop(jobid_to_fetch, None)
-
-    def _get_new_result(self):
-        """Return the latest completed job from Flux, or None."""
-        try:
-            return flux.job.wait(self.__broker)
-        except OSError:  # no waitable jobs
-            return None
-
-    def _get_cached_result(self):
-        """Return the first unrecognized job, or None."""
-        try:
-            return self.__unrecognized_results.popleft()
-        except IndexError:  # no unrecognized results
-            return None
-
-    def _complete_future(self, user_future, result):
-        """Mark a Future as completed with an error or a result."""
-        if result.success:
-            user_future.set_result(None)
-        else:
-            user_future.set_exception(
-                Exception(f"Job exited abnormally: {result.errstr}")
-            )
+class JobFailure(Exception):
+    pass
 
 
-class SubmissionThread(threading.Thread):
+class FluxExecutorThread(threading.Thread):
     """Thread that, when started, submits jobspecs to Flux."""
 
     def __init__(
         self,
         exit_event,
         jobspecs_to_submit,
-        jobid_future_pairs,
+        event_timer,
         broker_args,
         broker_kwargs,
         **kwargs,
@@ -94,32 +38,53 @@ class SubmissionThread(threading.Thread):
         super().__init__(**kwargs)
         self.__exit_event = exit_event
         self.__jobspecs_to_submit = jobspecs_to_submit
-        self.__jobid_future_pairs = jobid_future_pairs
+        self.__outstanding_futures = 0
+        self.__event_timer = event_timer
         self.__broker = flux.Flux(*broker_args, **broker_kwargs)
 
     def run(self):
         """Loop indefinitely, submitting jobspecs and fetching jobids."""
-        while not self.__exit_event.is_set():
-            while self.__jobspecs_to_submit:
-                jobspec, user_future = self.__jobspecs_to_submit.popleft()
-                flux.job.submit_async(self.__broker, jobspec, waitable=True).then(
-                    self._get_jobid_from_submission_future, user_future
-                )
-            if (
-                self.__broker.reactor_run(
-                    self.__broker.get_reactor(), flux.constants.FLUX_REACTOR_NOWAIT
-                )
-                < 0
-            ):
+        self.__broker.timer_watcher_create(self.__event_timer, self.__wait_on_new_jobs, repeat=self.__event_timer).start()
+        while self.__work_remains():
+            if self.__broker.reactor_run() < 0:
                 msg = "reactor start failed"
                 self.__broker.fatal_error(msg)
                 raise RuntimeError(msg)
 
-    def _get_jobid_from_submission_future(self, submission_future, user_future):
+    def __work_remains(self):
+        """Return True if and only if there is still work to be done.
+
+        Equivalently, return False if it is safe to exit.
+        """
+        return (not self.__exit_event.is_set() or self.__jobspecs_to_submit or self.__outstanding_futures > 0)
+
+    def __event_timer(self, *args):
+        if not self.__work_remains():
+            self.__broker.reactor_stop()
+        while self.__jobspecs_to_submit:
+            jobspec, user_future = self.__jobspecs_to_submit.popleft()
+            flux.job.submit_async(self.__broker, jobspec, waitable=True).then(
+                self.__get_jobid_from_submission_future, user_future
+            )
+            self.__outstanding_futures += 1
+
+    def __get_jobid_from_submission_future(self, submission_future, user_future):
         """Callback invoked when a jobid is ready for a submitted jobspec."""
         jobid = flux.job.submit_get_id(submission_future)
         user_future.set_jobid(jobid)
-        self.__jobid_future_pairs.append((jobid, user_future))
+        flux.job.wait_async(self.__broker, jobid).then(self.__complete_user_future, future)
+
+    @classmethod
+    def __complete_user_future(cls, wait_future, user_future):
+        """Callback invoked when a job has completed."""
+        result = wait_future.get_status()
+        self.__outstanding_futures -= 1
+        if result.success:
+            user_future.set_result(None)
+        else:
+            user_future.set_exception(
+                JobFailure(f"Job exited abnormally: {result.errstr}")
+            )
 
 
 class FluxExecutor:
@@ -140,42 +105,60 @@ class FluxExecutor:
     # Used to assign unique thread names when thread_name_prefix is not supplied.
     _counter = itertools.count().__next__
 
-    def __init__(self, thread_name_prefix="", broker_args=(), broker_kwargs={}):
+    def __init__(self, thread_name_prefix="", poll_frequency=0.25, broker_args=(), broker_kwargs={}):
         self._submission_queue = collections.deque()
         self._jobid_future_pairs = collections.deque()
+        self._shutdown_lock = threading.Lock()
         self._shutdown_event = threading.Event()
         thread_name_prefix = (
             thread_name_prefix or f"{type(self).__name__}-{self._counter()}"
         )
-        self._submission_thread = SubmissionThread(
+        self._executor_thread = FluxExecutorThread(
             self._shutdown_event,
             self._submission_queue,
-            self._jobid_future_pairs,
+            poll_frequency,
             broker_args,
             broker_kwargs,
-            daemon=True,
-            name=(thread_name_prefix + "-submission"),
+            name=(thread_name_prefix + "-0"),
         )
-        self._submission_thread.start()
-        self._waiting_thread = WaitingThread(
-            self._shutdown_event,
-            self._jobid_future_pairs,
-            broker_args,
-            broker_kwargs,
-            daemon=True,
-            name=(thread_name_prefix + "-waiting"),
-        )
-        self._waiting_thread.start()
+        self._executor_thread.start()
 
-    def shutdown(self):
-        self._shutdown_event.set()
+    def shutdown(self, wait=True, *, cancel_futures=False):
+        """Clean-up the resources associated with the Executor.
+
+        It is safe to call this method several times. Otherwise, no other
+        methods can be called after this one.
+
+
+        :param wait: If True then shutdown will not return until all running
+                futures have finished executing and the resources used by the
+                executor have been reclaimed.
+        :param cancel_futures: offered only
+        """
+        with self._shutdown_lock:
+            self._shutdown_event.set()
+        if wait:
+            self._executor_thread.join()
 
     def submit(self, jobspec):
         """Submit a jobspec to Flux and return a future."""
-        fut = FluxExecutorFuture()
-        fut.set_running_or_notify_cancel()
-        self._submission_queue.append((jobspec, fut))
-        return fut
+        with self._shutdown_lock:
+            if self._shutdown_event.is_set():
+                raise RuntimeError("cannot schedule new futures after shutdown")
+            fut = FluxExecutorFuture()
+            fut.set_running_or_notify_cancel()
+            self._submission_queue.append((jobspec, fut))
+            return fut
+
+    def map(self, *args, **kwargs):
+        raise NotImplementedError()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.shutdown(wait=True)
+        return False
 
 
 class FluxExecutorFuture(concurrent.futures.Future):
@@ -221,7 +204,6 @@ class FluxExecutorFuture(concurrent.futures.Future):
 
     def add_jobid_callback(self, fn):
         """Attaches a callable that will be called when the jobid is ready.
-
 
         :param fn: A callable that will be called with this future as its only
                 argument when the future completes or is cancelled. The callable

@@ -21,6 +21,7 @@ import flux.job
 
 class JobFailure(Exception):
     """Associated with a ``FluxExecutorFuture`` when a job fails."""
+
     pass
 
 
@@ -50,7 +51,9 @@ class FluxExecutorThread(threading.Thread):
 
     def run(self):
         """Loop indefinitely, submitting jobspecs and fetching jobids."""
-        self.__broker.timer_watcher_create(self.__poll_interval, self.__submit_new_jobs, repeat=self.__poll_interval).start()
+        self.__broker.timer_watcher_create(
+            self.__poll_interval, self.__submit_new_jobs, repeat=self.__poll_interval
+        ).start()
         while self.__work_remains():
             if self.__broker.reactor_run() < 0:
                 msg = "reactor start failed"
@@ -62,7 +65,11 @@ class FluxExecutorThread(threading.Thread):
 
         Equivalently, return False if it is safe to exit.
         """
-        return (not self.__exit_event.is_set() or self.__jobspecs_to_submit or self.__outstanding_futures > 0)
+        return (
+            not self.__exit_event.is_set()
+            or self.__jobspecs_to_submit
+            or self.__outstanding_futures > 0
+        )
 
     def __submit_new_jobs(self, *args):
         """Pull jobspecs from the queue and submit them.
@@ -87,7 +94,9 @@ class FluxExecutorThread(threading.Thread):
         """Callback invoked when a jobid is ready for a submitted jobspec."""
         jobid = flux.job.submit_get_id(submission_future)
         user_future.set_jobid(jobid)
-        flux.job.wait_async(self.__broker, jobid).then(self.__complete_user_future, user_future)
+        flux.job.wait_async(self.__broker, jobid).then(
+            self.__complete_user_future, user_future
+        )
 
     def __complete_user_future(self, wait_future, user_future):
         """Callback invoked when a job has completed."""
@@ -129,7 +138,14 @@ class FluxExecutor:
     # Used to assign unique thread names when thread_name_prefix is not supplied.
     _counter = itertools.count().__next__
 
-    def __init__(self, threads=1, thread_name_prefix="", poll_interval=0.1, broker_args=(), broker_kwargs={}):
+    def __init__(
+        self,
+        threads=1,
+        thread_name_prefix="",
+        poll_interval=0.1,
+        broker_args=(),
+        broker_kwargs={},
+    ):
         if threads < 0:
             raise ValueError("the number of threads must be > 0")
         self._submission_queue = collections.deque()
@@ -140,14 +156,17 @@ class FluxExecutor:
         thread_name_prefix = (
             thread_name_prefix or f"{type(self).__name__}-{self._counter()}"
         )
-        self._executor_threads = [FluxExecutorThread(
-            self._shutdown_event,
-            self._submission_queue,
-            poll_interval,
-            broker_args,
-            broker_kwargs,
-            name=(f"{thread_name_prefix}-{i}"),
-        ) for i in range(threads)]
+        self._executor_threads = [
+            FluxExecutorThread(
+                self._shutdown_event,
+                self._submission_queue,
+                poll_interval,
+                broker_args,
+                broker_kwargs,
+                name=(f"{thread_name_prefix}-{i}"),
+            )
+            for i in range(threads)
+        ]
         for t in self._executor_threads:
             t.start()
 
@@ -188,7 +207,9 @@ class FluxExecutor:
             return fut
 
     def map(self, *args, **kwargs):
-        raise NotImplementedError(f"{type(self).__name__} does not support the `map` method")
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support the `map` method"
+        )
 
     def __enter__(self):
         return self

@@ -21,6 +21,10 @@ def __flux_size():
     return 2
 
 
+def raise_error(msg):
+    raise RuntimeError(msg)
+
+
 class TestTimer(unittest.TestCase):
     @classmethod
     def setUpClass(self):
@@ -30,20 +34,20 @@ class TestTimer(unittest.TestCase):
         """Add a negative timer"""
         with self.assertRaises(EnvironmentError):
             self.f.timer_watcher_create(
-                -500, lambda x, y: x.fatal_error("timer should not run")
+                -500, lambda x, y: raise_error("timer should not run")
             )
 
     def test_s1_0_timer_add(self):
         """Add a timer"""
         with self.f.timer_watcher_create(
-            10000, lambda x, y, z, w: x.fatal_error("timer should not run")
+            10000, lambda x, y, z, w: raise_error("timer should not run")
         ) as tid:
             self.assertIsNotNone(tid)
 
     def test_s1_1_timer_remove(self):
         """Remove a timer"""
         to = self.f.timer_watcher_create(
-            10000, lambda x, y: x.fatal_error("timer should not run")
+            10000, lambda x, y: raise_error("timer should not run")
         )
         to.stop()
         to.destroy()
@@ -72,14 +76,14 @@ class TestTimer(unittest.TestCase):
 
     def test_msg_watcher_unicode(self):
         with self.f.msg_watcher_create(
-            lambda handle, x, y, z: handle.fatal_error("cb should not run"),
+            lambda handle, x, y, z: raise_error("cb should not run"),
             topic_glob="foo.*",
         ) as mw:
             self.assertIsNotNone(mw)
 
     def test_msg_watcher_bytes(self):
         with self.f.msg_watcher_create(
-            lambda handle, x, y, z: handle.fatal_error("cb should not run"),
+            lambda handle, x, y, z: raise_error("cb should not run"),
             topic_glob=b"foo.*",
         ) as mw:
             self.assertIsNotNone(mw)
@@ -94,28 +98,28 @@ class TestSignal(unittest.TestCase):
         """Add an invalid signal"""
         with self.assertRaises(EnvironmentError):
             self.f.signal_watcher_create(
-                -500, lambda x, y: x.fatal_error("signal should not fire")
+                -500, lambda x, y: raise_error("signal should not fire")
             )
         with self.assertRaises(EnvironmentError):
             self.f.signal_watcher_create(
-                0, lambda x, y: x.fatal_error("signal should not fire")
+                0, lambda x, y: raise_error("signal should not fire")
             )
         with self.assertRaises(EnvironmentError):
             self.f.signal_watcher_create(
-                500, lambda x, y: x.fatal_error("signal should not fire")
+                500, lambda x, y: raise_error("signal should not fire")
             )
 
     def test_s0_signal_watcher_add(self):
         """Add a signal watcher"""
         with self.f.signal_watcher_create(
-            2, lambda x, y, z, w: x.fatal_error("signal should not fire")
+            2, lambda x, y, z, w: raise_error("signal should not fire")
         ) as sigw:
             self.assertIsNotNone(sigw)
 
     def test_s1_signal_watcher_remove(self):
         """Remove a timer"""
         sigw = self.f.signal_watcher_create(
-            2, lambda x, y: x.fatal_error("signal should not fire")
+            2, lambda x, y: raise_error("signal should not fire")
         )
         sigw.stop()
         sigw.destroy()

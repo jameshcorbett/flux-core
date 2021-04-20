@@ -62,9 +62,7 @@ class _FluxExecutorThread(threading.Thread):
         while self.__work_remains():
             self.__submit_new_jobs(reactor_run=False)
             if self.__flux_handle.reactor_run() < 0:
-                msg = "reactor start failed"
-                self.__flux_handle.fatal_error(msg)
-                raise RuntimeError(msg)
+                raise RuntimeError("reactor start failed, executor broken")
 
     def __work_remains(self):
         """Return True if and only if there is still work to be done.

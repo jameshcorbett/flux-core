@@ -430,11 +430,26 @@ class Jobspec(object):
     def version(self):
         return self.jobspec.get("version", None)
 
-    def set_dependency(self, dependency):
+    def afterany_dependency(self, jobid):
+        self._set_dependency({"scheme": "afterany", "value": JobID(jobid)})
+
+    def after_dependency(self, jobid):
+        self._set_dependency({"scheme": "after", "value": JobID(jobid)})
+
+    def afterok_dependency(self, jobid):
+        self._set_dependency({"scheme": "afterok", "value": JobID(jobid)})
+
+    def afternotok_dependency(self, jobid):
+        self._set_dependency({"scheme": "afternotok", "value": JobID(jobid)})
+
+    def begintime_dependency(self, unix_seconds):
+        self._set_dependency({"scheme": "begin-time", "value": float(unix_seconds)})
+
+    def _set_dependency(self, dependency):
         dependencies = self.dependencies
         if dependencies is None:
             dependencies = self.jobspec["attributes"]["system"]["dependencies"] = []
-        dependencies.append(dependency.entry)
+        dependencies.append(dependency)
 
     @property
     def dependencies(self):

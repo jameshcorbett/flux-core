@@ -430,6 +430,19 @@ class Jobspec(object):
     def version(self):
         return self.jobspec.get("version", None)
 
+    def set_dependency(self, dependency):
+        dependencies = self.dependencies
+        if dependencies is None:
+            dependencies = self.jobspec["attributes"]["system"]["dependencies"] = []
+        dependencies.append(dependency.entry)
+
+    @property
+    def dependencies(self):
+        try:
+            return self.jobspec["attributes"]["system"]["dependencies"]
+        except KeyError:
+            return None
+
     def __iter__(self):
         """
         Iterate over the resources in the `resources` section of the jobspec.

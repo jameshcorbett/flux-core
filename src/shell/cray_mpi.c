@@ -18,7 +18,6 @@
 
 #include "jansson.h"
 
-#include "task.h"
 #include "builtins.h"
 
 
@@ -381,6 +380,9 @@ static int cray_mpi_init (flux_plugin_t *p,
 {
     const char *tmpdir;
     char apinfo_path[1024];
+    flux_shell_task_t *task;
+    flux_cmd_t *cmd;
+    int task_rank;
     flux_shell_t *shell = flux_plugin_get_shell (p);
 
     if (!(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR") )
@@ -389,23 +391,16 @@ static int cray_mpi_init (flux_plugin_t *p,
         || set_environment_shell (shell, apinfo_path) < 0){
         return -1;
     }
-    return 0;
-}
-
-
-static int cray_mpi_task_init (flux_plugin_t *p,
-                        const char *topic,
-                        flux_plugin_arg_t *args,
-                        void *data)
-{
-    flux_shell_t *shell = flux_plugin_get_shell (p);
-    flux_shell_task_t *task;
-
-    if (!shell
-        || !(task = flux_shell_current_task (shell))
-        || flux_cmd_setenvf (task->cmd, 1, "PALS_RANKID", "%d", task->rank) < 0){
-        return -1;
+    task = flux_shell_task_first (shell);
+    while (task != NULL){
+        if (!(cmd = flux_shell_task_cmd (task))
+            || flux_shell_task_info_unpack (task, "{s: i}", "rank", &task_rank) < 0
+            || flux_cmd_setenvf (cmd, 1, "PALS_RANKID", "%d", task_rank) < 0){
+            return -1;
+        }
+        task = flux_shell_task_next (shell);
     }
+
     return 0;
 }
 
@@ -413,5 +408,4 @@ static int cray_mpi_task_init (flux_plugin_t *p,
 struct shell_builtin builtin_cray_mpi = {
     .name = "cray_mpi",
     .init = cray_mpi_init,
-    .task_init = cray_mpi_task_init,
 };

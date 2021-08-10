@@ -46,8 +46,8 @@ extern struct shell_builtin builtin_batch;
 extern struct shell_builtin builtin_doom;
 
 static struct shell_builtin * builtins [] = {
-    &builtin_cray_mpi,
     &builtin_tmpdir,
+    &builtin_cray_mpi,
     &builtin_log_eventlog,
     &builtin_pmi,
     &builtin_input,

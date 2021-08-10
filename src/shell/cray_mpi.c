@@ -16,6 +16,8 @@
 
 #include <flux/shell.h>
 
+#include "jansson.h"
+
 #include "builtins.h"
 
 
@@ -261,7 +263,7 @@ static int write_pals_nodes (int fd)
 /*
  * Write the application information file
  */
-static int create_apinfo (void)
+static int create_apinfo (const char *apinfo_path)
 {
     int fd = -1;
     int ret = 0;
@@ -313,16 +315,13 @@ static int create_apinfo (void)
 
     // Get information to write
     build_header (&hdr, ncmds, ntasks, nnodes);
-    if (!(pes = setup_pals_pes (ntasks, nnodes, task_cnts, &tid_ptr, tid_offsets))) {
-        goto error;
-    }
-    if (!(cmds = setup_pals_cmds (ncmds, ntasks, nnodes, cores_per_task, pes))) {
+    if (!(pes = setup_pals_pes (ntasks, nnodes, task_cnts, &tid_ptr, tid_offsets))
+        || !(cmds = setup_pals_cmds (ncmds, ntasks, nnodes, cores_per_task, pes))){
         goto error;
     }
 
-    // Create the file
-    if ((fd = open ("apinfo", O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR)) == -1) {
-        shell_log_errno ("Couldn't open apinfo file");
+    if ((fd = open (apinfo_path, O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR)) == -1) {
+        shell_log_errno ("Couldn't open apinfo file %s", apinfo_path);
         goto error;
     }
 
@@ -357,12 +356,19 @@ error:
 }
 
 
-static int shell_rank (flux_shell_t *shell)
-{
+static int set_environment_shell (flux_shell_t *shell, const char *apinfo_path){
     int rank = -1;
-    if (flux_shell_info_unpack (shell, "{s:i}", "rank", &rank) < 0)
+    json_int_t jobid;
+    const char *tmpdir;
+
+    if (flux_shell_info_unpack (shell, "{s:i, s:I}", "rank", &rank, "jobid", &jobid) < 0
+        || flux_shell_setenvf (shell, 1, "PALS_NODEID", "%i", rank) < 0
+        || flux_shell_setenvf (shell, 1, "PALS_APID", JSON_INTEGER_FORMAT, jobid) < 0
+        || !(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR"))
+        || flux_shell_setenvf (shell, 1, "PALS_SPOOL_DIR", "%s", tmpdir) < 0
+        || flux_shell_setenvf (shell, 1, "PALS_APINFO", "%s", apinfo_path) < 0){
         return -1;
-    return rank;
+    }
 }
 
 
@@ -371,9 +377,32 @@ static int cray_mpi_init (flux_plugin_t *p,
                         flux_plugin_arg_t *args,
                         void *data)
 {
+    const char *tmpdir;
+    char apinfo_path[1024];
     flux_shell_t *shell = flux_plugin_get_shell (p);
-    if (shell_rank (shell) == 0){
-        return create_apinfo();
+
+    if (!(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR") )
+        || snprintf (apinfo_path, sizeof (apinfo_path), "%s/%s", tmpdir, "libpals_apinfo") >= sizeof (apinfo_path)
+        || create_apinfo(apinfo_path) < 0 ||
+        || set_environment (shell, apinfo_path) < 0){
+        return -1;
+    }
+    return 0;
+}
+
+
+static int cray_mpi_task_init (flux_plugin_t *p,
+                        const char *topic,
+                        flux_plugin_arg_t *args,
+                        void *data)
+{
+    flux_shell_t *shell = flux_plugin_get_shell (p);
+    flux_shell_task_t *task;
+
+    if (!shell
+        || !(task = flux_shell_current_task (shell))
+        || flux_cmd_setenvf (task->cmd, 1, "PALS_RANKID", "%d", task->rank) < 0){
+        return -1;
     }
     return 0;
 }
@@ -382,4 +411,5 @@ static int cray_mpi_init (flux_plugin_t *p,
 struct shell_builtin builtin_cray_mpi = {
     .name = "cray_mpi",
     .init = cray_mpi_init,
+    .task_init = cray_mpi_task_init,
 };

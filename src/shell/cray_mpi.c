@@ -8,9 +8,16 @@
  * SPDX-License-Identifier: LGPL-3.0
 \************************************************************/
 
+#include <stdlib.h>
 #include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+#include <stdint.h>
 
-#include "cray_mpi.h"
+#include <flux/shell.h>
+
+#include "builtins.h"
+
 
 /* Application file format version */
 #define PALS_APINFO_VERSION 1
@@ -74,6 +81,24 @@ typedef struct {
     char address[40];                 /* Address of this NIC */
 } pals_nic_t;
 
+
+static int safe_write(int fd, char *buf, size_t size){
+    int rc;
+    while(size > 0) {
+        rc = write(fd, buf, size);
+            if (rc < 0) {
+            if ((errno == EAGAIN) || (errno == EINTR))
+                continue;
+            return -1;
+        } else {
+            buf += rc;
+            size -= rc;
+        }
+    }
+    return 0;
+}
+
+
 /*
  * Return an array of pals_pe_t structures.
  */
@@ -93,8 +118,7 @@ static pals_pe_t *setup_pals_pes (int ntasks,
         for (localidx = 0; localidx < task_cnts[nodeidx]; localidx++) {
             taskid = tids[nodeidx][localidx];
             if (taskid >= ntasks) {
-                shell_log_errno ("%s: task %d node %d >= ntasks %d; skipping",
-                                 plugin_type,
+                shell_log_errno ("task %d node %d >= ntasks %d; skipping",
                                  taskid,
                                  nodeidx,
                                  ntasks);
@@ -179,7 +203,7 @@ static pals_cmd_t *setup_pals_cmds (int ncmds,
 /*
  * Fill in the apinfo header
  */
-static void _build_header (pals_header_t *hdr, int ncmds, int npes, int nnodes)
+static void build_header (pals_header_t *hdr, int ncmds, int npes, int nnodes)
 {
     size_t offset = sizeof (pals_header_t);
 
@@ -222,105 +246,92 @@ static int write_pals_nodes (int fd)
     char host[256];
     pals_node_t node;
 
-    host = gethostname(host, sizeof(host));  // HACK
+    gethostname(host, sizeof(host));  // HACK
     memset (&node, 0, sizeof (pals_node_t));
     if (1) {  // HACK
         snprintf (node.hostname, sizeof (node.hostname), "%s", host);
         node.nid = 0;
-        if (safe_write (fd, &node, sizeof (pals_node_t)) < 0){
-        	return -1;
+        if (safe_write (fd, (char *) &node, sizeof (pals_node_t)) < 0){
+            return -1;
         }
     }
+    return 0;
 }
 
 /*
  * Write the application information file
  */
-extern int create_apinfo (const stepd_step_rec_t *job)
+static int create_apinfo (void)
 {
     int fd = -1;
+    int ret = 0;
     pals_header_t hdr;
     pals_cmd_t *cmds = NULL;
     pals_pe_t *pes = NULL;
-    int ntasks, ncmds, nnodes;
-    uint16_t *task_cnts;
-    uint32_t **tids;
-    uint32_t *tid_offsets;
-    char *nodelist;
-    bool free_tid_offsets = false;
+    int ntasks, ncmds, nnodes, cores_per_task;
+    uint16_t task_cnts[] = {0, 1};
+    uint32_t tids[] = {0, 1};
+    uint32_t *tid_offsets = NULL;
+    bool free_tid_offsets = 0;
+    uint32_t *tid_ptr = tids;
 
     // Get relevant information from job
-    if (job->het_job_offset != NO_VAL) {
-        ntasks = job->het_job_ntasks;
-        ncmds = job->het_job_step_cnt;
-        nnodes = job->het_job_nnodes;
-        task_cnts = job->het_job_task_cnts;
-        tids = job->het_job_tids;
-        tid_offsets = job->het_job_tid_offsets;
-        nodelist = job->het_job_node_list;
-    } else {
-        ntasks = job->ntasks;
-        nnodes = job->nnodes;
-        task_cnts = job->msg->tasks_to_launch;
-        tids = job->msg->global_task_ids;
-        nodelist = job->msg->complete_nodelist;
 
-        if (job->flags & LAUNCH_MULTI_PROG) {
-            _multi_prog_parse (job, &ncmds, &tid_offsets);
-            free_tid_offsets = true;
-        } else {
-            ncmds = 1;
-            tid_offsets = NULL;
-        }
-    }
+    ntasks = 1;
+    nnodes = 1;
+    ncmds = 1;
+    cores_per_task = 1;
+    //tids = job->msg->global_task_ids;
+    //nodelist = job->msg->complete_nodelist;
+
 
     // Make sure we've got everything
-    if (ntasks <= 0) {
-        shell_log_errno ("no tasks found");
-        goto error;
-    }
-    if (ncmds <= 0) {
-        shell_log_errno ("no cmds found");
-        goto error;
-    }
-    if (nnodes <= 0) {
-        shell_log_errno ("no nodes found");
-        goto error;
-    }
-    if (task_cnts == NULL) {
-        shell_log_errno ("no per-node task counts");
-        goto error;
-    }
-    if (tids == NULL) {
-        shell_log_errno ("no task IDs found");
-        goto error;
-    }
-    if (nodelist == NULL) {
-        shell_log_errno ("no nodelist found");
-        goto error;
-    }
+    // if (ntasks <= 0) {
+    //     shell_log_errno ("no tasks found");
+    //     goto error;
+    // }
+    // if (ncmds <= 0) {
+    //     shell_log_errno ("no cmds found");
+    //     goto error;
+    // }
+    // if (nnodes <= 0) {
+    //     shell_log_errno ("no nodes found");
+    //     goto error;
+    // }
+    // if (&task_cnts == NULL) {
+    //     shell_log_errno ("no per-node task counts");
+    //     goto error;
+    // }
+    // if (&tids == NULL) {
+    //     shell_log_errno ("no task IDs found");
+    //     goto error;
+    // }
+    // if (nodelist == NULL) {
+    //     shell_log_errno ("no nodelist found");
+    //     goto error;
+    // }
 
     // Get information to write
-    _build_header (&hdr, ncmds, ntasks, nnodes);
-    if (!(pes = setup_pals_pes (ntasks, nnodes, task_cnts, tids, tid_offsets))) {
+    build_header (&hdr, ncmds, ntasks, nnodes);
+    if (!(pes = setup_pals_pes (ntasks, nnodes, task_cnts, &tid_ptr, tid_offsets))) {
         goto error;
     }
-    if (!(cmds = setup_pals_cmds (ncmds, ntasks, nnodes, job->cpus_per_task, pes))) {
+    if (!(cmds = setup_pals_cmds (ncmds, ntasks, nnodes, cores_per_task, pes))) {
         goto error;
     }
 
     // Create the file
     if ((fd = open ("apinfo", O_WRONLY|O_CREAT|O_TRUNC, 0600)) == -1) {
-    	shell_log_errno ("Couldn't open apinfo file");
+        shell_log_errno ("Couldn't open apinfo file");
         goto error;
     }
 
     // Write info
-    if (safe_write (fd, &hdr, sizeof (pals_header_t)) < 0
-    	|| safe_write (fd, cmds, (hdr.ncmds * sizeof (pals_cmd_t))) < 0
-    	|| safe_write (fd, pes, (hdr.npes * sizeof (pals_pe_t)) < 0)
-    	|| write_pals_nodes (fd, nodelist) < 0){
-    	goto error;
+    if (safe_write (fd, (char *) &hdr, sizeof (pals_header_t)) < 0
+        || safe_write (fd, (char *) cmds, (hdr.ncmds * sizeof (pals_cmd_t))) < 0
+        || safe_write (fd, (char *) pes, (hdr.npes * sizeof (pals_pe_t)) < 0)
+        || write_pals_nodes (fd) < 0){
+        goto error;
     }
 
     // Flush changes to disk
@@ -335,16 +346,24 @@ cleanup:
     }
 
     if (pes)
-    	free (pes);
+        free (pes);
     if (cmds)
-    	free (cmds);
+        free (cmds);
     close (fd);
     return ret;
 error:
-	ret = -1;
-	goto cleanup;
+    ret = -1;
+    goto cleanup;
 }
 
+
+static int shell_rank (flux_shell_t *shell)
+{
+    int rank = -1;
+    if (flux_shell_info_unpack (shell, "{s:i}", "rank", &rank) < 0)
+        return -1;
+    return rank;
+}
 
 
 static int cray_mpi_init (flux_plugin_t *p,
@@ -352,28 +371,11 @@ static int cray_mpi_init (flux_plugin_t *p,
                         flux_plugin_arg_t *args,
                         void *data)
 {
-	flux_shell_t *shell = flux_plugin_get_shell (p);
-	if (shell_rank (shell) == 0){
-		return 0;
-	}
-	return 0;
-}
-
-
-static int safe_write(int fd, char *buf, size_t size){
-	int rc;
-	while(size > 0) {
-		rc = write(fd, buf, size);
-			if (rc < 0) {
-			if ((errno == EAGAIN) || (errno == EINTR))
-				continue;
-			return -1;
-		} else {
-			buf += rc;
-			size -= rc;
-		}
-	}
-	return 0;
+    flux_shell_t *shell = flux_plugin_get_shell (p);
+    if (shell_rank (shell) == -1){
+        return create_apinfo();
+    }
+    return 0;
 }
 
 

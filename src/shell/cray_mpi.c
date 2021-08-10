@@ -8,7 +8,9 @@
  * SPDX-License-Identifier: LGPL-3.0
 \************************************************************/
 
-#include "apinfo.h"
+#include <fcntl.h>
+
+#include "cray_mpi.h"
 
 /* Application file format version */
 #define PALS_APINFO_VERSION 1
@@ -213,61 +215,22 @@ static void _build_header (pals_header_t *hdr, int ncmds, int npes, int nnodes)
 }
 
 /*
- * Open the apinfo file and return a writeable fd, or -1 on failure
- */
-static int _open_apinfo (const stepd_step_rec_t *job)
-{
-    int fd = -1;
-
-    xfree (apinfo);
-    // Create apinfo name - put in per-application spool directory
-    apinfo = xstrdup_printf ("%s/apinfo", appdir);
-
-    // Create file
-    fd = creat (apinfo, 0600);
-    if (fd == -1) {
-        error ("%s: Couldn't open apinfo file %s: %m", plugin_type, apinfo);
-        close (fd);
-        return -1;
-    }
-
-    // Change ownership of file to application user
-    if ((fchown (fd, job->uid, job->gid) == -1) && (getuid () == 0)) {
-        error ("%s: Couldn't chown %s to uid %d gid %d: %m",
-               plugin_type,
-               apinfo,
-               job->uid,
-               job->gid);
-        close (fd);
-        return -1;
-    }
-
-    return fd;
-}
-
-/*
  * Write the job's node list to the file
  */
-static int _write_pals_nodes (int fd, char *nodelist)
+static int write_pals_nodes (int fd)
 {
-    hostlist_t hl;
-    char *host;
+    char host[256];
     pals_node_t node;
 
+    host = gethostname(host, sizeof(host));  // HACK
     memset (&node, 0, sizeof (pals_node_t));
-    if (!(hl = hostlist_create (nodelist))) {
-        error ("%s: Couldn't create hostlist", plugin_type);
-        return SLURM_ERROR;
-    }
-    while ((host = hostlist_shift (hl))) {
+    if (1) {  // HACK
         snprintf (node.hostname, sizeof (node.hostname), "%s", host);
-        node.nid = _get_nid (host);
-        free (host);
-        safe_write (fd, &node, sizeof (pals_node_t));
+        node.nid = 0;
+        if (safe_write (fd, &node, sizeof (pals_node_t)) < 0){
+        	return -1;
+        }
     }
-rwfail:
-    hostlist_destroy (hl);
-    return SLURM_SUCCESS;
 }
 
 /*
@@ -285,11 +248,6 @@ extern int create_apinfo (const stepd_step_rec_t *job)
     uint32_t *tid_offsets;
     char *nodelist;
     bool free_tid_offsets = false;
-
-    // Make sure the application spool directory has been created
-    if (!appdir) {
-        return SLURM_ERROR;
-    }
 
     // Get relevant information from job
     if (job->het_job_offset != NO_VAL) {
@@ -318,79 +276,108 @@ extern int create_apinfo (const stepd_step_rec_t *job)
 
     // Make sure we've got everything
     if (ntasks <= 0) {
-        error ("%s: no tasks found", plugin_type);
-        goto rwfail;
+        shell_log_errno ("no tasks found");
+        goto error;
     }
     if (ncmds <= 0) {
-        error ("%s: no cmds found", plugin_type);
-        goto rwfail;
+        shell_log_errno ("no cmds found");
+        goto error;
     }
     if (nnodes <= 0) {
-        error ("%s: no nodes found", plugin_type);
-        goto rwfail;
+        shell_log_errno ("no nodes found");
+        goto error;
     }
     if (task_cnts == NULL) {
-        error ("%s: no per-node task counts", plugin_type);
-        goto rwfail;
+        shell_log_errno ("no per-node task counts");
+        goto error;
     }
     if (tids == NULL) {
-        error ("%s: no task IDs found", plugin_type);
-        goto rwfail;
+        shell_log_errno ("no task IDs found");
+        goto error;
     }
     if (nodelist == NULL) {
-        error ("%s: no nodelist found", plugin_type);
-        goto rwfail;
+        shell_log_errno ("no nodelist found");
+        goto error;
     }
 
     // Get information to write
     _build_header (&hdr, ncmds, ntasks, nnodes);
     if (!(pes = setup_pals_pes (ntasks, nnodes, task_cnts, tids, tid_offsets))) {
-        return -1;
+        goto error;
     }
     if (!(cmds = setup_pals_cmds (ncmds, ntasks, nnodes, job->cpus_per_task, pes))) {
-        free (pes);
-        return -1;
+        goto error;
     }
 
     // Create the file
-    if ((fd = _open_apinfo (job)) == -1) {
-        goto rwfail;
+    if ((fd = open ("apinfo", O_WRONLY|O_CREAT|O_TRUNC, 0600)) == -1) {
+    	shell_log_errno ("Couldn't open apinfo file");
+        goto error;
     }
 
     // Write info
-    safe_write (fd, &hdr, sizeof (pals_header_t));
-    safe_write (fd, cmds, (hdr.ncmds * sizeof (pals_cmd_t)));
-    safe_write (fd, pes, (hdr.npes * sizeof (pals_pe_t)));
-
-    if (_write_pals_nodes (fd, nodelist) == SLURM_ERROR)
-        goto rwfail;
-
-    // TODO: Write communication profiles
-    // TODO write nics
+    if (safe_write (fd, &hdr, sizeof (pals_header_t)) < 0
+    	|| safe_write (fd, cmds, (hdr.ncmds * sizeof (pals_cmd_t))) < 0
+    	|| safe_write (fd, pes, (hdr.npes * sizeof (pals_pe_t)) < 0)
+    	|| write_pals_nodes (fd, nodelist) < 0){
+    	goto error;
+    }
 
     // Flush changes to disk
     if (fsync (fd) == -1) {
-        error ("%s: Couldn't sync %s to disk: %m", plugin_type, apinfo);
-        goto rwfail;
+        shell_log_errno ("Couldn't sync apinfo to disk");
+        goto error;
     }
 
-    debug ("%s: Wrote apinfo file %s", plugin_type, apinfo);
+cleanup:
+    if (free_tid_offsets && tid_offsets){
+        free (tid_offsets);
+    }
 
-    // Clean up and return
-    if (free_tid_offsets)
-        xfree (tid_offsets);
-
-    xfree (pes);
-    xfree (cmds);
+    if (pes)
+    	free (pes);
+    if (cmds)
+    	free (cmds);
     close (fd);
-    return SLURM_SUCCESS;
-
-rwfail:
-    if (free_tid_offsets)
-        xfree (tid_offsets);
-
-    xfree (pes);
-    xfree (cmds);
-    close (fd);
-    return SLURM_ERROR;
+    return ret;
+error:
+	ret = -1;
+	goto cleanup;
 }
+
+
+
+static int cray_mpi_init (flux_plugin_t *p,
+                        const char *topic,
+                        flux_plugin_arg_t *args,
+                        void *data)
+{
+	flux_shell_t *shell = flux_plugin_get_shell (p);
+	if (shell_rank (shell) == 0){
+		return 0;
+	}
+	return 0;
+}
+
+
+static int safe_write(int fd, char *buf, size_t size){
+	int rc;
+	while(size > 0) {
+		rc = write(fd, buf, size);
+			if (rc < 0) {
+			if ((errno == EAGAIN) || (errno == EINTR))
+				continue;
+			return -1;
+		} else {
+			buf += rc;
+			size -= rc;
+		}
+	}
+	return 0;
+}
+
+
+struct shell_builtin builtin_cray_mpi = {
+    .name = "cray_mpi",
+    .init = cray_mpi_init,
+};

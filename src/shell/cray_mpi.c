@@ -243,8 +243,8 @@ static void build_header (pals_header_t *hdr, int ncmds, int npes, int nnodes)
  */
 static int write_pals_nodes (int fd)
 {
-    char host[256];
     pals_node_t node;
+    char host[sizeof (node.hostname)];
 
     gethostname(host, sizeof(host));  // HACK
     memset (&node, 0, sizeof (pals_node_t));
@@ -321,7 +321,7 @@ static int create_apinfo (void)
     }
 
     // Create the file
-    if ((fd = open ("apinfo", O_WRONLY|O_CREAT|O_TRUNC, 0600)) == -1) {
+    if ((fd = open ("apinfo", O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR)) == -1) {
         shell_log_errno ("Couldn't open apinfo file");
         goto error;
     }
@@ -372,7 +372,7 @@ static int cray_mpi_init (flux_plugin_t *p,
                         void *data)
 {
     flux_shell_t *shell = flux_plugin_get_shell (p);
-    if (shell_rank (shell) == -1){
+    if (shell_rank (shell) == 0){
         return create_apinfo();
     }
     return 0;

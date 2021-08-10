@@ -18,6 +18,7 @@
 
 #include "jansson.h"
 
+#include "task.h"
 #include "builtins.h"
 
 
@@ -363,12 +364,13 @@ static int set_environment_shell (flux_shell_t *shell, const char *apinfo_path){
 
     if (flux_shell_info_unpack (shell, "{s:i, s:I}", "rank", &rank, "jobid", &jobid) < 0
         || flux_shell_setenvf (shell, 1, "PALS_NODEID", "%i", rank) < 0
-        || flux_shell_setenvf (shell, 1, "PALS_APID", JSON_INTEGER_FORMAT, jobid) < 0
+        || flux_shell_setenvf (shell, 1, "PALS_APID", "%" JSON_INTEGER_FORMAT, jobid) < 0
         || !(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR"))
         || flux_shell_setenvf (shell, 1, "PALS_SPOOL_DIR", "%s", tmpdir) < 0
         || flux_shell_setenvf (shell, 1, "PALS_APINFO", "%s", apinfo_path) < 0){
         return -1;
     }
+    return 0;
 }
 
 
@@ -383,8 +385,8 @@ static int cray_mpi_init (flux_plugin_t *p,
 
     if (!(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR") )
         || snprintf (apinfo_path, sizeof (apinfo_path), "%s/%s", tmpdir, "libpals_apinfo") >= sizeof (apinfo_path)
-        || create_apinfo(apinfo_path) < 0 ||
-        || set_environment (shell, apinfo_path) < 0){
+        || create_apinfo(apinfo_path) < 0
+        || set_environment_shell (shell, apinfo_path) < 0){
         return -1;
     }
     return 0;

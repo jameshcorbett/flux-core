@@ -234,7 +234,7 @@ static void build_header (pals_header_t *hdr, int ncmds, int npes, int nnodes)
     offset += hdr->node_size * hdr->nnodes;
 
     hdr->nic_size = sizeof (pals_nic_t);
-    hdr->nic_offset = offset;
+    hdr->nic_offset = 216;
     hdr->nnics = 0;
     offset += hdr->nic_size * hdr->nnics;
 

@@ -255,30 +255,75 @@ static int write_pals_nodes (int fd)
     return 0;
 }
 
+
+static int *get_task_counts (flux_shell_t *shell, int shell_size){
+    int *task_counts;
+    int i;
+
+    if (!(task_counts = malloc(shell_size * sizeof shell_size))){
+        return NULL;
+    }
+    for (i = 0; i < shell_size; ++i)
+    {
+        if (flux_shell_rank_info_unpack (shell, i, "{s:i}", "ntasks", &task_counts[i]) < 0){
+            free (task_counts);
+            return NULL;
+        }
+    }
+    return task_counts;
+}
+
+
+static int **get_task_ids (int *task_counts, int shell_size){
+    int **task_ids;
+    int shell_rank, j;
+    int curr_task_id = 0;
+
+    if (!(task_ids = malloc(shell_size * sizeof task_counts))){
+        return NULL;
+    }
+    for (shell_rank = 0; shell_rank < shell_size; ++shell_rank)
+    {
+        if(!(task_ids[shell_rank] = malloc(task_counts[shell_rank] * sizeof task_counts))){
+            for (j = 0; j < shell_rank; ++j){
+                free (task_ids[shell_rank]);
+            }
+            free (task_ids);
+            return NULL;
+        }
+        for (j = 0; j < task_counts[shell_rank]; ++j)
+        {
+            task_ids[shell_rank][j] = curr_task_id++;
+        }
+    }
+    return task_ids;
+}
+
+
+
 /*
  * Write the application information file
  */
 static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
 {
-    int fd = -1;
-    int ret = 0;
+    int fd = -1, ret = 0, ntasks = 0;
     pals_header_t hdr;
     pals_cmd_t *cmds = NULL;
     pals_pe_t *pes = NULL;
-    int ntasks, nnodes, cores_per_task;
-    int tids[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
-    int *tid_ptr = tids;
-    json_t *jobspec;
+    int shell_size, cores_per_task = 1;
+    int *task_counts = NULL, **task_ids = NULL;
+    json_t *R_obj;
 
     // Get relevant information from job
 
-    flux_shell_info_unpack (shell, "{s:i, s:o, s:i}", "size", &nnodes, "jobspec", &jobspec, "ntasks", &ntasks);
-    cores_per_task = 1;
-
-
-    if (ntasks < 1 || nnodes < 1) {
-        shell_log_error ("Invalid job specification");
+    if (flux_shell_info_unpack (shell, "{s:i, s:o}", "size", &shell_size, "R", &R_obj) < 0
+        || !(task_counts = get_task_counts (shell, shell_size))
+        || !(task_ids = get_task_ids (task_counts, shell_size))){
         goto error;
+    }
+    for (int i = 0; i < shell_size; ++i)
+    {
+        ntasks += task_counts[i];
     }
 
     // if (nodelist == NULL) {
@@ -287,9 +332,9 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
     // }
 
     // Get information to write
-    build_header (&hdr, 1, ntasks, nnodes);
-    if (!(pes = setup_pals_pes (ntasks, nnodes, &ntasks, &tid_ptr))
-        || !(cmds = setup_pals_cmds (1, ntasks, nnodes, cores_per_task, pes))){
+    build_header (&hdr, 1, ntasks, shell_size);
+    if (!(pes = setup_pals_pes (ntasks, shell_size, task_counts, task_ids))
+        || !(cmds = setup_pals_cmds (1, ntasks, shell_size, cores_per_task, pes))){
         goto error;
     }
 
@@ -314,6 +359,15 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
 
 cleanup:
 
+    if (task_counts)
+        free (task_counts);
+    if (task_ids){
+        for (int i = 0; i < shell_size; ++i)
+        {
+            free (task_ids[i]);
+        }
+        free (task_ids);
+    }
     if (pes)
         free (pes);
     if (cmds)

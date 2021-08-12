@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <stdint.h>
 
+#include <flux/hostlist.h>
 #include <flux/shell.h>
 
 #include "jansson.h"
@@ -238,19 +239,32 @@ static void build_header (pals_header_t *hdr, int ncmds, int npes, int nnodes)
 /*
  * Write the job's node list to the file
  */
-static int write_pals_nodes (int fd)
+static int write_pals_nodes (int fd, json_t *nodelist_array)
 {
+    size_t index;
+    int node_index = 0;
+    json_t *value;
+    struct hostlist *hlist;
+    const char *entry;
     pals_node_t node;
-    char host[sizeof (node.hostname)];
 
-    gethostname(host, sizeof(host));  // HACK
-    memset (&node, 0, sizeof (pals_node_t));
-    if (1) {  // HACK
-        snprintf (node.hostname, sizeof (node.hostname), "%s", host);
-        node.nid = 0;
-        if (safe_write (fd, &node, sizeof (pals_node_t)) < 0){
+    if (!(hlist = hostlist_create ())){
+        return -1;
+    }
+    json_array_foreach(nodelist_array, index, value) {
+        if (!(entry = json_string_value (value))
+            || hostlist_append (hlist, entry) < 0){
             return -1;
         }
+    }
+    entry = hostlist_first (hlist);
+    while (entry){
+        node.nid = node_index++;
+        if (snprintf (node.hostname, sizeof node.hostname, "%s", entry) >= sizeof node.hostname
+            || safe_write (fd, &node, sizeof (pals_node_t)) < 0){
+            return -1;
+        }
+        entry = hostlist_next (hlist);
     }
     return 0;
 }
@@ -312,11 +326,12 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
     pals_pe_t *pes = NULL;
     int shell_size, cores_per_task = 1;
     int *task_counts = NULL, **task_ids = NULL;
-    json_t *R_obj;
+    json_t *nodelist_array;
 
     // Get relevant information from job
 
-    if (flux_shell_info_unpack (shell, "{s:i, s:o}", "size", &shell_size, "R", &R_obj) < 0
+    if (flux_shell_info_unpack (shell, "{s:i, s:{s:{s:o}}}", "size", &shell_size, "R", "execution", "nodelist", &nodelist_array) < 0
+        || !json_is_array (nodelist_array)
         || !(task_counts = get_task_counts (shell, shell_size))
         || !(task_ids = get_task_ids (task_counts, shell_size))){
         goto error;
@@ -347,7 +362,7 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
     if (safe_write (fd, &hdr, sizeof (pals_header_t)) < 0
         || safe_write (fd, cmds, (hdr.ncmds * sizeof (pals_cmd_t))) < 0
         || safe_write (fd, pes, (hdr.npes * sizeof (pals_pe_t))) < 0
-        || write_pals_nodes (fd) < 0){
+        || write_pals_nodes (fd, nodelist_array) < 0){
         goto error;
     }
 

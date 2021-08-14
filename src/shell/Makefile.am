@@ -112,9 +112,9 @@ flux_shell_LDFLAGS = \
 	-export-dynamic \
 	-Wl,--version-script=$(srcdir)/flux-shell.map
 
-plugin_pals_la_SOURCES = plugins/pals.c
-plugin_pals_la_CPPFLAGS = $(AM_CPPFLAGS)
-plugin_pals_la_LDFLAGS = \
+plugins_pals_la_SOURCES = plugins/pals.c
+plugins_pals_la_CPPFLAGS = $(AM_CPPFLAGS)
+plugins_pals_la_LDFLAGS = \
 	$(fluxplugin_ldflags) -module
 
 EXTRA_DIST = \

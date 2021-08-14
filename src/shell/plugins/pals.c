@@ -19,8 +19,6 @@
 
 #include "jansson.h"
 
-#include "builtins.h"
-
 
 /* Application file format version */
 #define PALS_APINFO_VERSION 1
@@ -412,7 +410,7 @@ static int set_environment_shell (flux_shell_t *shell, const char *apinfo_path){
 }
 
 
-static int cray_mpi_init (flux_plugin_t *p,
+static int libpals_init (flux_plugin_t *p,
                         const char *topic,
                         flux_plugin_arg_t *args,
                         void *data)
@@ -431,7 +429,7 @@ static int cray_mpi_init (flux_plugin_t *p,
 }
 
 
-static int cray_mpi_task_init (flux_plugin_t *p,
+static int libpals_task_init (flux_plugin_t *p,
                         const char *topic,
                         flux_plugin_arg_t *args,
                         void *data)
@@ -452,8 +450,11 @@ static int cray_mpi_task_init (flux_plugin_t *p,
 }
 
 
-struct shell_builtin builtin_cray_mpi = {
-    .name = "cray_mpi",
-    .init = cray_mpi_init,
-    .task_init = cray_mpi_task_init,
-};
+int flux_plugin_init (flux_plugin_t *p){
+    if (flux_plugin_set_name (p, "libpals") < 0
+        || flux_plugin_add_handler (p, "shell.init", libpals_init, NULL) < 0
+        || flux_plugin_add_handler (p, "task.init", libpals_task_init, NULL) < 0){
+        return -1;
+    }
+    return 0;
+}

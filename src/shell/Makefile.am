@@ -88,8 +88,7 @@ flux_shell_SOURCES = \
 	mpir/ptrace.c \
 	mustache.h \
 	mustache.c \
-	doom.c \
-	cray_mpi.c
+	doom.c
 
 flux_shell_LDADD = \
 	$(builddir)/libshell.la \
@@ -109,6 +108,14 @@ flux_shell_LDADD = \
 flux_shell_LDFLAGS = \
 	-export-dynamic \
 	-Wl,--version-script=$(srcdir)/flux-shell.map
+
+plugin_pals_la_SOURCES = plugins/pals.c
+plugin_pals_la_CPPFLAGS = $(AM_CPPFLAGS)
+plugin_pals_la_LDFLAGS = \
+	$(fluxplugin_ldflags) -module -rpath /nowhere
+
+shell_plugin_LTLIBRARIES = \
+        plugins/pals.la
 
 EXTRA_DIST = \
 	flux-shell.map

@@ -53,6 +53,9 @@ fluxinclude_HEADERS = \
 
 fluxlibexec_PROGRAMS = flux-shell
 
+shell_plugin_LTLIBRARIES = \
+        plugins/pals.la
+
 flux_shell_SOURCES = \
 	shell.c \
 	shell.h \
@@ -112,10 +115,7 @@ flux_shell_LDFLAGS = \
 plugin_pals_la_SOURCES = plugins/pals.c
 plugin_pals_la_CPPFLAGS = $(AM_CPPFLAGS)
 plugin_pals_la_LDFLAGS = \
-	$(fluxplugin_ldflags) -module -rpath /nowhere
-
-shell_plugin_LTLIBRARIES = \
-        plugins/pals.la
+	$(fluxplugin_ldflags) -module
 
 EXTRA_DIST = \
 	flux-shell.map

@@ -114,6 +114,8 @@ flux_shell_LDFLAGS = \
 
 plugins_pals_la_SOURCES = plugins/pals.c
 plugins_pals_la_CPPFLAGS = $(AM_CPPFLAGS)
+plugins_pals_la_LIBADD = $(top_builddir)/src/common/libflux-hostlist.la \
+	$(top_builddir)/src/common/libflux-core.la
 plugins_pals_la_LDFLAGS = \
 	$(fluxplugin_ldflags) -module
 

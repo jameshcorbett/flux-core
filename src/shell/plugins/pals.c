@@ -8,17 +8,16 @@
  * SPDX-License-Identifier: LGPL-3.0
 \************************************************************/
 
-#include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include <flux/hostlist.h>
 #include <flux/shell.h>
 
 #include "jansson.h"
-
 
 /* Application file format version */
 #define PALS_APINFO_VERSION 1
@@ -82,11 +81,11 @@ typedef struct {
     char address[40];                 /* Address of this NIC */
 } pals_nic_t;
 
-
-static int safe_write(int fd, const void *buf, size_t size){
+static int safe_write (int fd, const void *buf, size_t size)
+{
     ssize_t rc;
-    while(size > 0) {
-        rc = write(fd, buf, size);
+    while (size > 0) {
+        rc = write (fd, buf, size);
         if (rc < 0) {
             if ((errno == EAGAIN) || (errno == EINTR))
                 continue;
@@ -99,14 +98,10 @@ static int safe_write(int fd, const void *buf, size_t size){
     return 0;
 }
 
-
 /*
  * Return an array of pals_pe_t structures.
  */
-static pals_pe_t *setup_pals_pes (int ntasks,
-                                  int nnodes,
-                                  int *task_cnts,
-                                  int **tids)
+static pals_pe_t *setup_pals_pes (int ntasks, int nnodes, int *task_cnts, int **tids)
 {
     pals_pe_t *pes = NULL;
     int nodeidx, localidx, taskid;
@@ -114,9 +109,11 @@ static pals_pe_t *setup_pals_pes (int ntasks,
     if (!(pes = calloc (ntasks, sizeof (pals_pe_t)))) {  // create one PE for each task
         return NULL;
     }
-    for (nodeidx = 0; nodeidx < nnodes; nodeidx++) { // for each node identifier nodeidx ...
-        for (localidx = 0; localidx < task_cnts[nodeidx]; localidx++) { // for each task within that node
-            taskid = tids[nodeidx][localidx]; // get the global task ID of that task
+    for (nodeidx = 0; nodeidx < nnodes;
+         nodeidx++) {  // for each node identifier nodeidx ...
+        for (localidx = 0; localidx < task_cnts[nodeidx];
+             localidx++) {                     // for each task within that node
+            taskid = tids[nodeidx][localidx];  // get the global task ID of that task
             if (taskid >= ntasks) {
                 shell_log_error ("taskid %d (on node %d) >= ntasks %d",
                                  taskid,
@@ -246,20 +243,22 @@ static int write_pals_nodes (int fd, json_t *nodelist_array)
     const char *entry;
     pals_node_t node;
 
-    if (!(hlist = hostlist_create ())){
+    if (!(hlist = hostlist_create ())) {
         return -1;
     }
-    json_array_foreach(nodelist_array, index, value) {
+    json_array_foreach (nodelist_array, index, value)
+    {
         if (!(entry = json_string_value (value))
-            || hostlist_append (hlist, entry) < 0){
+            || hostlist_append (hlist, entry) < 0) {
             return -1;
         }
     }
     entry = hostlist_first (hlist);
-    while (entry){
+    while (entry) {
         node.nid = node_index++;
-        if (snprintf (node.hostname, sizeof node.hostname, "%s", entry) >= sizeof node.hostname
-            || safe_write (fd, &node, sizeof (pals_node_t)) < 0){
+        if (snprintf (node.hostname, sizeof node.hostname, "%s", entry)
+                >= sizeof node.hostname
+            || safe_write (fd, &node, sizeof (pals_node_t)) < 0) {
             return -1;
         }
         entry = hostlist_next (hlist);
@@ -267,17 +266,17 @@ static int write_pals_nodes (int fd, json_t *nodelist_array)
     return 0;
 }
 
-
-static int *get_task_counts (flux_shell_t *shell, int shell_size){
+static int *get_task_counts (flux_shell_t *shell, int shell_size)
+{
     int *task_counts;
     int i;
 
-    if (!(task_counts = malloc(shell_size * sizeof shell_size))){
+    if (!(task_counts = malloc (shell_size * sizeof shell_size))) {
         return NULL;
     }
-    for (i = 0; i < shell_size; ++i)
-    {
-        if (flux_shell_rank_info_unpack (shell, i, "{s:i}", "ntasks", &task_counts[i]) < 0){
+    for (i = 0; i < shell_size; ++i) {
+        if (flux_shell_rank_info_unpack (shell, i, "{s:i}", "ntasks", &task_counts[i])
+            < 0) {
             free (task_counts);
             return NULL;
         }
@@ -285,33 +284,30 @@ static int *get_task_counts (flux_shell_t *shell, int shell_size){
     return task_counts;
 }
 
-
-static int **get_task_ids (int *task_counts, int shell_size){
+static int **get_task_ids (int *task_counts, int shell_size)
+{
     int **task_ids;
     int shell_rank, j;
     int curr_task_id = 0;
 
-    if (!(task_ids = malloc(shell_size * sizeof task_counts))){
+    if (!(task_ids = malloc (shell_size * sizeof task_counts))) {
         return NULL;
     }
-    for (shell_rank = 0; shell_rank < shell_size; ++shell_rank)
-    {
-        if(!(task_ids[shell_rank] = malloc(task_counts[shell_rank] * sizeof task_counts))){
-            for (j = 0; j < shell_rank; ++j){
+    for (shell_rank = 0; shell_rank < shell_size; ++shell_rank) {
+        if (!(task_ids[shell_rank] =
+                  malloc (task_counts[shell_rank] * sizeof task_counts))) {
+            for (j = 0; j < shell_rank; ++j) {
                 free (task_ids[shell_rank]);
             }
             free (task_ids);
             return NULL;
         }
-        for (j = 0; j < task_counts[shell_rank]; ++j)
-        {
+        for (j = 0; j < task_counts[shell_rank]; ++j) {
             task_ids[shell_rank][j] = curr_task_id++;
         }
     }
     return task_ids;
 }
-
-
 
 /*
  * Write the application information file
@@ -328,14 +324,21 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
 
     // Get relevant information from job
 
-    if (flux_shell_info_unpack (shell, "{s:i, s:{s:{s:o}}}", "size", &shell_size, "R", "execution", "nodelist", &nodelist_array) < 0
+    if (flux_shell_info_unpack (shell,
+                                "{s:i, s:{s:{s:o}}}",
+                                "size",
+                                &shell_size,
+                                "R",
+                                "execution",
+                                "nodelist",
+                                &nodelist_array)
+            < 0
         || !json_is_array (nodelist_array)
         || !(task_counts = get_task_counts (shell, shell_size))
-        || !(task_ids = get_task_ids (task_counts, shell_size))){
+        || !(task_ids = get_task_ids (task_counts, shell_size))) {
         goto error;
     }
-    for (int i = 0; i < shell_size; ++i)
-    {
+    for (int i = 0; i < shell_size; ++i) {
         ntasks += task_counts[i];
     }
 
@@ -347,11 +350,12 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
     // Get information to write
     build_header (&hdr, 1, ntasks, shell_size);
     if (!(pes = setup_pals_pes (ntasks, shell_size, task_counts, task_ids))
-        || !(cmds = setup_pals_cmds (1, ntasks, shell_size, cores_per_task, pes))){
+        || !(cmds = setup_pals_cmds (1, ntasks, shell_size, cores_per_task, pes))) {
         goto error;
     }
 
-    if ((fd = open (apinfo_path, O_WRONLY|O_CREAT|O_TRUNC, S_IRUSR|S_IWUSR)) == -1) {
+    if ((fd = open (apinfo_path, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR))
+        == -1) {
         shell_log_errno ("Couldn't open apinfo file %s", apinfo_path);
         goto error;
     }
@@ -360,7 +364,7 @@ static int create_apinfo (const char *apinfo_path, flux_shell_t *shell)
     if (safe_write (fd, &hdr, sizeof (pals_header_t)) < 0
         || safe_write (fd, cmds, (hdr.ncmds * sizeof (pals_cmd_t))) < 0
         || safe_write (fd, pes, (hdr.npes * sizeof (pals_pe_t))) < 0
-        || write_pals_nodes (fd, nodelist_array) < 0){
+        || write_pals_nodes (fd, nodelist_array) < 0) {
         goto error;
     }
 
@@ -374,9 +378,8 @@ cleanup:
 
     if (task_counts)
         free (task_counts);
-    if (task_ids){
-        for (int i = 0; i < shell_size; ++i)
-        {
+    if (task_ids) {
+        for (int i = 0; i < shell_size; ++i) {
             free (task_ids[i]);
         }
         free (task_ids);
@@ -392,68 +395,71 @@ error:
     goto cleanup;
 }
 
-
-static int set_environment_shell (flux_shell_t *shell, const char *apinfo_path){
+static int set_environment_shell (flux_shell_t *shell, const char *apinfo_path)
+{
     int rank = -1;
     json_int_t jobid;
     const char *tmpdir;
 
     if (flux_shell_info_unpack (shell, "{s:i, s:I}", "rank", &rank, "jobid", &jobid) < 0
         || flux_shell_setenvf (shell, 1, "PALS_NODEID", "%i", rank) < 0
-        || flux_shell_setenvf (shell, 1, "PALS_APID", "%" JSON_INTEGER_FORMAT, jobid) < 0
+        || flux_shell_setenvf (shell, 1, "PALS_APID", "%" JSON_INTEGER_FORMAT, jobid)
+               < 0
         || !(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR"))
         || flux_shell_setenvf (shell, 1, "PALS_SPOOL_DIR", "%s", tmpdir) < 0
-        || flux_shell_setenvf (shell, 1, "PALS_APINFO", "%s", apinfo_path) < 0){
+        || flux_shell_setenvf (shell, 1, "PALS_APINFO", "%s", apinfo_path) < 0) {
         return -1;
     }
     return 0;
 }
 
-
 static int libpals_init (flux_plugin_t *p,
-                        const char *topic,
-                        flux_plugin_arg_t *args,
-                        void *data)
+                         const char *topic,
+                         flux_plugin_arg_t *args,
+                         void *data)
 {
     const char *tmpdir;
     char apinfo_path[1024];
     flux_shell_t *shell = flux_plugin_get_shell (p);
 
-    if (!(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR") )
-        || snprintf (apinfo_path, sizeof (apinfo_path), "%s/%s", tmpdir, "libpals_apinfo") >= sizeof (apinfo_path)
-        || create_apinfo(apinfo_path, shell) < 0
-        || set_environment_shell (shell, apinfo_path) < 0){
+    if (!(tmpdir = flux_shell_getenv (shell, "FLUX_JOB_TMPDIR"))
+        || snprintf (apinfo_path,
+                     sizeof (apinfo_path),
+                     "%s/%s",
+                     tmpdir,
+                     "libpals_apinfo")
+               >= sizeof (apinfo_path)
+        || create_apinfo (apinfo_path, shell) < 0
+        || set_environment_shell (shell, apinfo_path) < 0) {
         return -1;
     }
     return 0;
 }
 
-
 static int libpals_task_init (flux_plugin_t *p,
-                        const char *topic,
-                        flux_plugin_arg_t *args,
-                        void *data)
+                              const char *topic,
+                              flux_plugin_arg_t *args,
+                              void *data)
 {
     flux_shell_t *shell = flux_plugin_get_shell (p);
     flux_shell_task_t *task;
     flux_cmd_t *cmd;
     int task_rank;
 
-    if (!shell
-        || !(task = flux_shell_current_task (shell))
+    if (!shell || !(task = flux_shell_current_task (shell))
         || !(cmd = flux_shell_task_cmd (task))
         || flux_shell_task_info_unpack (task, "{s:i}", "rank", &task_rank) < 0
-        || flux_cmd_setenvf (cmd, 1, "PALS_RANKID", "%d", task_rank) < 0){
+        || flux_cmd_setenvf (cmd, 1, "PALS_RANKID", "%d", task_rank) < 0) {
         return -1;
     }
     return 0;
 }
 
-
-int flux_plugin_init (flux_plugin_t *p){
+int flux_plugin_init (flux_plugin_t *p)
+{
     if (flux_plugin_set_name (p, "libpals") < 0
         || flux_plugin_add_handler (p, "shell.init", libpals_init, NULL) < 0
-        || flux_plugin_add_handler (p, "task.init", libpals_task_init, NULL) < 0){
+        || flux_plugin_add_handler (p, "task.init", libpals_task_init, NULL) < 0) {
         return -1;
     }
     return 0;

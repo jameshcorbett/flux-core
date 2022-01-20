@@ -242,6 +242,8 @@ int flux_job_result_get (flux_future_t *f,
  */
 int flux_job_result_get_unpack (flux_future_t *f, const char *fmt, ...);
 
+flux_future_t *flux_job_file_bcast (flux_t *h, flux_jobid_t id, const char *path, const char *destpath, size_t chunksize, int flags);
+
 #ifdef __cplusplus
 }
 #endif

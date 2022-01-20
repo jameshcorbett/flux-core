@@ -44,6 +44,7 @@ extern struct shell_builtin builtin_ptrace;
 extern struct shell_builtin builtin_pty;
 extern struct shell_builtin builtin_batch;
 extern struct shell_builtin builtin_doom;
+extern struct shell_builtin builtin_bcast;
 
 static struct shell_builtin * builtins [] = {
     &builtin_tmpdir,
@@ -60,6 +61,7 @@ static struct shell_builtin * builtins [] = {
     &builtin_pty,
     &builtin_batch,
     &builtin_doom,
+    &builtin_bcast,
     &builtin_list_end,
 };
 
